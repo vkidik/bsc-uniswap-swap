@@ -4,9 +4,9 @@ const { ethers } = require('ethers');
 
 const CONFIG = {
   MNEMONIC: process.env.MNEMONIC || '',
-  AMOUNT: '100%', // AMOUNT can be specified as a percentage (e.g., '100%') or a fixed value (e.g., '10')
-  INPUT_MINT: '0xOutput_mint_token',
-  OUTPUT_MINT: '0xInput_mint_token',
+  AMOUNT: '50%', // AMOUNT can be specified as a percentage (e.g., '100%') or as a fixed value (e.g., '10')
+  INPUT_MINT: '0xinput_mint_token',
+  OUTPUT_MINT: '0xoutput_mint_token',
   RPC_URL: 'https://bsc-dataseed.binance.org/',
   PANCAKESWAP_ROUTER_ADDRESS: '0x10ED43C718714eb63d5aA57B78B54704E256024E',
   WBNB_ADDRESS: "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
@@ -61,7 +61,7 @@ async function swapTokens(mnemonic, amount, inputMint, outputMint) {
       throw new Error('Error fetching token decimals or balance: ' + error.message);
     }
     
-    // Determine amount for swap
+    // Calculate swap amount
     let amountIn;
     try {
       if (typeof amount === 'string' && amount.endsWith('%')) {
@@ -73,7 +73,7 @@ async function swapTokens(mnemonic, amount, inputMint, outputMint) {
       console.log(`Swap amount: ${ethers.utils.formatUnits(amountIn, decimals)} ${inputTokenName}`);
       
       if (amountIn.isZero()) {
-        throw new Error(`No available balance for token ${inputTokenName}`);
+        throw new Error(`Insufficient balance for token ${inputTokenName}`);
       }
     } catch (error) {
       throw new Error('Error calculating swap amount: ' + error.message);
@@ -93,7 +93,7 @@ async function swapTokens(mnemonic, amount, inputMint, outputMint) {
       throw new Error(`Error initializing output token ${outputMint}: ` + error.message);
     }
     
-    // Setup PancakeSwap Router
+    // Set up PancakeSwap Router
     let routerAddress = CONFIG.PANCAKESWAP_ROUTER_ADDRESS;
     let routerAbi;
     if (isNativeOutput) {
@@ -122,6 +122,22 @@ async function swapTokens(mnemonic, amount, inputMint, outputMint) {
       throw new Error('Error building swap path: ' + error.message);
     }
     
+    // Check for liquidity pools for each pair using PancakeSwap factory
+    try {
+      const FACTORY_ADDRESS = '0xca143ce32fe78f1f7019d7d551a6402fc5350c73';
+      const factoryAbi = ['function getPair(address tokenA, address tokenB) external view returns (address pair)'];
+      const factoryContract = new ethers.Contract(FACTORY_ADDRESS, factoryAbi, provider);
+      
+      for (let i = 0; i < path.length - 1; i++) {
+        const pairAddress = await factoryContract.getPair(path[i], path[i+1]);
+        if (pairAddress === ethers.constants.AddressZero) {
+          throw new Error(`No liquidity pool found for pair: ${path[i]} -> ${path[i+1]}`);
+        }
+      }
+    } catch (error) {
+      throw new Error('Liquidity check error: ' + error.message);
+    }
+    
     const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes
     
     // Get gas fee data
@@ -133,7 +149,7 @@ async function swapTokens(mnemonic, amount, inputMint, outputMint) {
       throw new Error('Error fetching gas fee data: ' + error.message);
     }
     
-    // Estimate gas for approve
+    // Estimate gas for approve operation
     const approvalGasLimit = ethers.BigNumber.from("100000");
     const approvalGasCost = approvalGasLimit.mul(currentGasPrice);
     console.log(`Estimated gas for approve: ${ethers.utils.formatEther(approvalGasCost)} BNB`);
@@ -145,7 +161,7 @@ async function swapTokens(mnemonic, amount, inputMint, outputMint) {
       amountOutMin = amounts[amounts.length - 1].mul(95).div(100);
       const outputDecimals = isNativeOutput ? 18 : await outputTokenContract.decimals();
       console.log(`Expected output: ${ethers.utils.formatUnits(amounts[amounts.length - 1], outputDecimals)} ${outputTokenName}`);
-      console.log(`Minimum ${outputTokenName} (95%): ${ethers.utils.formatUnits(amountOutMin, outputDecimals)}`);
+      console.log(`Minimum output (95%): ${ethers.utils.formatUnits(amountOutMin, outputDecimals)}`);
     } catch (error) {
       throw new Error('Error fetching getAmountsOut data: ' + error.message);
     }
